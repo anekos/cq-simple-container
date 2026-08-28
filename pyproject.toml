@@ -34,3 +34,9 @@ dev = [
 [tool.mypy]
 mypy_path = "src"
 explicit_package_bases = true
+
+# Do not follow into cadquery: its dependencies ship broken type stubs (casadi).
+[[tool.mypy.overrides]]
+module = ["cadquery.*", "casadi.*"]
+ignore_missing_imports = true
+follow_imports = "skip"
