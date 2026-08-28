@@ -4,12 +4,9 @@ import cadquery as cq
 from click_cadquery import BuildParam
 from click_cadquery.git import version_number as ver
 from click_cadquery.partition import (
-    Layout,
-    PartitionError,
     PartitionExpr,
-    Rect,
-    parse,
-    solve,
+    PartitionParam,
+    partition_field,
     walls_solid,
 )
 from pydantic import model_validator
@@ -18,7 +15,8 @@ Measure = Literal["outer", "inner"]
 """Whether a given dimension is the outer size or the inner (cavity) size."""
 
 
-class Param(BuildParam):
+# PartitionParam supplies layout() and the partition-must-fit validation.
+class Param(BuildParam, PartitionParam):
     width: float = 120.0
     """Size along X."""
     width_measure: Measure = "outer"
@@ -37,8 +35,7 @@ class Param(BuildParam):
     fillet: float = 3.0
     """Radius of the vertical corners. 0 disables filleting."""
 
-    partition: PartitionExpr = PartitionExpr("2x3")
-    """Divider layout: N | NxM | '30,40,*' | '1:2:1' | '30(3),*' (nesting flips axis)."""
+    partition: PartitionExpr = partition_field("2x3")
 
     @property
     def outer_width(self) -> float:
@@ -68,18 +65,6 @@ class Param(BuildParam):
     def _outer(self, value: float, measure: Measure, walls: int) -> float:
         return value if measure == "outer" else value + walls * self.thickness
 
-    def layout(self) -> Layout:
-        return solve(
-            parse(self.partition),
-            Rect(
-                -self.inner_width / 2,
-                -self.inner_depth / 2,
-                self.inner_width,
-                self.inner_depth,
-            ),
-            self.thickness,
-        )
-
     @model_validator(mode="after")
     def _check(self) -> "Param":
         if self.thickness <= 0:
@@ -93,10 +78,6 @@ class Param(BuildParam):
             )
         if self.fillet > min(self.outer_width, self.outer_depth) / 2:
             raise ValueError("fillet is too large for the outer size")
-        try:
-            self.layout()
-        except PartitionError as e:
-            raise ValueError(f"the partition does not fit: {e}") from e
         return self
 
     @property
