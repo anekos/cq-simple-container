@@ -3,6 +3,15 @@ from typing import Literal
 import cadquery as cq
 from click_cadquery import BuildParam
 from click_cadquery.git import version_number as ver
+from click_cadquery.partition import (
+    Layout,
+    PartitionError,
+    PartitionExpr,
+    Rect,
+    parse,
+    solve,
+    walls_solid,
+)
 from pydantic import model_validator
 
 Measure = Literal["outer", "inner"]
@@ -28,11 +37,8 @@ class Param(BuildParam):
     fillet: float = 3.0
     """Radius of the vertical corners. 0 disables filleting."""
 
-    width_dividers: int = 1
-    """Number of dividers along the width (walls perpendicular to X)."""
-
-    depth_dividers: int = 2
-    """Number of dividers along the depth (walls perpendicular to Y)."""
+    partition: PartitionExpr = PartitionExpr("2x3")
+    """Divider layout: N | NxM | '30,40,*' | '1:2:1' | '30(3),*' (nesting flips axis)."""
 
     @property
     def outer_width(self) -> float:
@@ -62,6 +68,18 @@ class Param(BuildParam):
     def _outer(self, value: float, measure: Measure, walls: int) -> float:
         return value if measure == "outer" else value + walls * self.thickness
 
+    def layout(self) -> Layout:
+        return solve(
+            parse(self.partition),
+            Rect(
+                -self.inner_width / 2,
+                -self.inner_depth / 2,
+                self.inner_width,
+                self.inner_depth,
+            ),
+            self.thickness,
+        )
+
     @model_validator(mode="after")
     def _check(self) -> "Param":
         if self.thickness <= 0:
@@ -75,14 +93,10 @@ class Param(BuildParam):
             )
         if self.fillet > min(self.outer_width, self.outer_depth) / 2:
             raise ValueError("fillet is too large for the outer size")
-        if min(self.width_dividers, self.depth_dividers) < 0:
-            raise ValueError("the number of dividers must not be negative")
-        for name, inner, count in (
-            ("width", self.inner_width, self.width_dividers),
-            ("depth", self.inner_depth, self.depth_dividers),
-        ):
-            if inner - count * self.thickness <= 0:
-                raise ValueError(f"too many dividers along the {name}")
+        try:
+            self.layout()
+        except PartitionError as e:
+            raise ValueError(f"the partition does not fit: {e}") from e
         return self
 
     @property
@@ -91,17 +105,13 @@ class Param(BuildParam):
             f"v{ver()}"
             f"-{self.outer_width:g}w{self.outer_height:g}h{self.outer_depth:g}d"
             f"-{self.thickness:g}t{self.fillet:g}r"
-            f"-{self.width_dividers}x{self.depth_dividers}div"
+            f"-{self.partition.translate(_FILENAME_SAFE)}div"
             ".stl"
         )
 
 
-def divider_offsets(inner: float, thickness: float, count: int) -> list[float]:
-    """Centre offsets of `count` dividers evenly splitting `inner` into equal cells."""
-    if count <= 0:
-        return []
-    cell = (inner - count * thickness) / (count + 1)
-    return [-inner / 2 + (i + 1) * cell + (i + 0.5) * thickness for i in range(count)]
+# Shell- and glob-unsafe characters of partition expressions, mapped for filenames.
+_FILENAME_SAFE = str.maketrans({"*": "@", ",": "+", "(": "[", ")": "]", ":": "="})
 
 
 def build(param: Param) -> cq.Workplane:
@@ -121,28 +131,8 @@ def build(param: Param) -> cq.Workplane:
 
     # Dividers overlap the surrounding walls by t/2 on each end so that the union
     # never has to merge coincident faces.
-    for x in divider_offsets(param.inner_width, t, param.width_dividers):
-        result = result.union(
-            cq.Workplane("XY")
-            .box(
-                t,
-                param.inner_depth + t,
-                param.inner_height,
-                centered=(True, True, False),
-            )
-            .translate((x, 0, t))
-        )
-
-    for y in divider_offsets(param.inner_depth, t, param.depth_dividers):
-        result = result.union(
-            cq.Workplane("XY")
-            .box(
-                param.inner_width + t,
-                t,
-                param.inner_height,
-                centered=(True, True, False),
-            )
-            .translate((0, y, t))
-        )
+    walls = walls_solid(param.layout(), param.inner_height)
+    if walls is not None:
+        result = result.union(walls.translate((0, 0, t)))
 
     return result
