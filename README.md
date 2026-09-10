@@ -18,12 +18,9 @@ uv run simple-container build --depth-measure inner --depth 60
 | `--width-measure` / `--height-measure` / `--depth-measure` | `outer` | `outer` or `inner` — whether the value above is the outer size or the cavity size |
 | `--thickness` | `2` | Wall / floor / divider thickness |
 | `--fillet` | `3` | Radius of the vertical corners (`0` disables) |
-| `--width-dividers` | `1` | Dividers perpendicular to X |
-| `--depth-dividers` | `2` | Dividers perpendicular to Y |
+| `--partition` | `2x3` | Partition expression dividing the cavity into cells (preview with `uv run app partition`) |
 
 The box is open at the top, so `--height-measure inner` only adds the floor
 thickness, while the width and depth add two walls each.
 
-Dividers split the cavity into equal cells: `n` dividers give `n + 1` cells, so
-the default `1 x 2` yields a 2 x 3 grid. They run the full inner height, flush
-with the top of the walls.
+Dividers run the full inner height, flush with the top of the walls.
