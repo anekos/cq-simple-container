@@ -19,7 +19,7 @@ uv run simple-container build --depth-measure inner --depth 60
 | `--thickness` | `2` | Wall / floor / divider thickness |
 | `--fillet` | `3` | Radius of the vertical corners (`0` disables) |
 | `--partition` | `2x3` | Partition expression dividing the cavity into cells (preview with `uv run app partition`) |
-| `--slit-side` | `none` | Side wall to cut a U-shaped slit into: `front`/`back` (-Y/+Y) or `left`/`right` (-X/+X) |
+| `--slit-side` | `none` | Side walls to cut a U-shaped slit into: `front`/`back` (-Y/+Y) or `left`/`right` (-X/+X), comma-separated for several (e.g. `front,back`) |
 | `--slit-width` | `25` | Width of the slit = diameter of its semicircular bottom |
 | `--slit-depth` | half the height | Distance from the top edge down to the lowest point of the slit |
 
@@ -28,6 +28,7 @@ thickness, while the width and depth add two walls each.
 
 Dividers run the full inner height, flush with the top of the walls.
 
-The slit is cut through the chosen wall after the box is built, open at the
-top edge, so contents can be pushed up and lifted out. It must fit the flat
-part of the wall (between the corner fillets) and stop above the floor.
+A slit is cut through each chosen wall after the box is built, open at the
+top edge, so contents can be pushed up and lifted out. All slits share the
+same width and depth, must fit the flat part of their wall (between the
+corner fillets) and stop above the floor.

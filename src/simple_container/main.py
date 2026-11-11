@@ -14,8 +14,8 @@ from pydantic import model_validator
 Measure = Literal["outer", "inner"]
 """Whether a given dimension is the outer size or the inner (cavity) size."""
 
-SlitSide = Literal["none", "front", "back", "left", "right"]
-"""Which side wall carries the U-shaped slit: front/back face -Y/+Y,
+SLIT_SIDES = ("front", "back", "left", "right")
+"""Side walls that can carry a U-shaped slit: front/back face -Y/+Y,
 left/right face -X/+X."""
 
 
@@ -41,9 +41,10 @@ class Param(BuildParam, PartitionParam):
 
     partition: PartitionExpr = partition_field("2x3")
 
-    slit_side: SlitSide = "none"
-    """Cut a U-shaped slit into this side wall, open at the top, for
-    lifting the contents out. "none" disables it."""
+    slit_side: str = "none"
+    """Side walls to cut a U-shaped slit into, open at the top, for lifting
+    the contents out: front/back/left/right, comma-separated for several
+    (e.g. "front,back"). "none" disables it."""
 
     slit_width: float = 25.0
     """Width of the slit = diameter of its semicircular bottom."""
@@ -77,6 +78,13 @@ class Param(BuildParam, PartitionParam):
     def inner_height(self) -> float:
         return self.outer_height - self.thickness
 
+    @property
+    def slit_sides(self) -> list[str]:
+        """The sides of slit_side as a list; empty when disabled."""
+        if self.slit_side in ("", "none"):
+            return []
+        return [side.strip() for side in self.slit_side.split(",")]
+
     def _outer(self, value: float, measure: Measure, walls: int) -> float:
         return value if measure == "outer" else value + walls * self.thickness
 
@@ -93,20 +101,27 @@ class Param(BuildParam, PartitionParam):
             )
         if self.fillet > min(self.outer_width, self.outer_depth) / 2:
             raise ValueError("fillet is too large for the outer size")
-        if self.slit_side != "none":
+        if sides := self.slit_sides:
+            unknown = [side for side in sides if side not in SLIT_SIDES]
+            if unknown:
+                raise ValueError(
+                    f"unknown slit side: {', '.join(unknown)} "
+                    f"(choose from {', '.join(SLIT_SIDES)}, comma-separated)"
+                )
+            if len(set(sides)) != len(sides):
+                raise ValueError("slit sides must not repeat")
             if self.slit_width <= 0:
                 raise ValueError("slit_width must be positive")
-            span = (
-                self.outer_width
-                if self.slit_side in ("front", "back")
-                else self.outer_depth
-            )
-            flat = span - 2 * max(self.fillet, self.thickness)
-            if self.slit_width > flat:
-                raise ValueError(
-                    "slit_width does not fit the flat part of the "
-                    f"{self.slit_side} wall (at most {flat:g})"
+            for side in sides:
+                span = (
+                    self.outer_width if side in ("front", "back") else self.outer_depth
                 )
+                flat = span - 2 * max(self.fillet, self.thickness)
+                if self.slit_width > flat:
+                    raise ValueError(
+                        "slit_width does not fit the flat part of the "
+                        f"{side} wall (at most {flat:g})"
+                    )
             if self.slit_depth is None:
                 self.slit_depth = self.outer_height / 2
             if self.slit_depth < self.slit_width / 2:
@@ -124,8 +139,8 @@ class Param(BuildParam, PartitionParam):
     @property
     def filename(self) -> str:
         slit = (
-            f"-{self.slit_side}{self.slit_width:g}x{self.slit_depth:g}slit"
-            if self.slit_side != "none"
+            f"-{'+'.join(self.slit_sides)}{self.slit_width:g}x{self.slit_depth:g}slit"
+            if self.slit_sides
             else ""
         )
         return (
@@ -163,13 +178,13 @@ def build(param: Param) -> cq.Workplane:
     if walls is not None:
         result = result.union(walls.translate((0, 0, t)))
 
-    if param.slit_side != "none":
-        result = result.cut(_slit_cutter(param))
+    for side in param.slit_sides:
+        result = result.cut(_slit_cutter(param, side))
 
     return result
 
 
-def _slit_cutter(param: Param) -> cq.Workplane:
+def _slit_cutter(param: Param, side: str) -> cq.Workplane:
     """A solid covering the U-shaped slit: a rectangle running past the top
     edge, closed at the bottom by a semicircle of diameter slit_width. It
     spans the wall thickness with margin on both sides (0.1 into the cavity,
@@ -189,7 +204,7 @@ def _slit_cutter(param: Param) -> cq.Workplane:
         "back": ("XZ", (0, param.outer_depth / 2 - param.thickness - 0.1, 0), -thick),
         "left": ("YZ", (-param.outer_width / 2 + param.thickness + 0.1, 0, 0), -thick),
         "right": ("YZ", (param.outer_width / 2 - param.thickness - 0.1, 0, 0), thick),
-    }[param.slit_side]
+    }[side]
 
     return (
         cq.Workplane(plane, origin=cq.Vector(origin))
